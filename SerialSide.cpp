@@ -26,6 +26,9 @@ uint8_t GET_FIRMWARE [] = { 02, 00, 00, 00 };
 
 #define LOOK4SYNC   // reverse eng of S3KM1110
 
+// do not enable when driven by the S3K app 
+//#define ECHO_TELNET_TO_SERIAL
+
 
 #if 1
 // danger uart 1 is the flash (ouch).
@@ -34,24 +37,6 @@ HardwareSerial HostSide(0);
 #define HostSide Serial
 #error caution serial echos back to term :(
 #endif
-
-void request_firmware(void)
-{
-	int i;
-	for (i = 0; i < ELEMENTS(SYNC_START); i++) 
-	{
-		sk3k1110.write(SYNC_START[i]);
-	}
-
-	for (i = 0; i < ELEMENTS(GET_FIRMWARE); i++) 
-	{
-		sk3k1110.write(GET_FIRMWARE[i]);
-	}
-	for (i = 0; i < ELEMENTS(SYNC_END); i++) 
-	{
-		sk3k1110.write(SYNC_END[i]);
-	}
-}
 
 uint32_t lastReading = 0;
 
@@ -74,9 +59,6 @@ void rs232_setup(void)
     while (sk3k1110.available()) sk3k1110.read();
 
     HostSide.printf("looping\n");
-    request_firmware();
-    
-    
 }
 
 #define MAX_CHARS 80
@@ -102,10 +84,21 @@ char bigBuffer[2000];
 
 //--------------------------------------------------------------
 
-void sendit(char *what)
+void send2TelenetMonitor(char *what)
 {
+	//always
     telnet.println(what);
+
+
+    // normally not enabled as this chatter
+    // could be sent into the windows app and mess it up.
+    //
+    // if your not driving it from the S31110 app 
+    // turn it on so you can watch.
+    
+    #ifdef ECHO_TELNET_TO_SERIAL
 	HostSide.printf("%s", what);
+	#endif 
 }
 
 //--------------------------------------------------------------
@@ -113,11 +106,10 @@ void sendit(char *what)
 #define WIDE 32
 void dump(char * tag, uint8_t *array, int size)
 {
-
 	int forward = 0;
 	
-	sprintf(bigBuffer, "%s[%d] : ", tag, size);
-	sendit(bigBuffer);
+	sprintf(bigBuffer, "T=%9d %s[%d] : ", millis(), tag, size);
+	send2TelenetMonitor(bigBuffer);
 	
 	while (size > 0)
 	{
@@ -149,110 +141,58 @@ void dump(char * tag, uint8_t *array, int size)
 		
 		len += sprintf(&bigBuffer[len], "\n");
 
-		sendit(bigBuffer);
+		send2TelenetMonitor(bigBuffer);
 		
 		size -= run;
 	}
 
 }
 
+
 //--------------------------------------------------------------
-
-static int testRequestCnt =0;
-
-void rs232_loop() 
+void process_fromS3(void)
 {
-
-  if (testRequestCnt++ > 10000)
-  {
-  	request_firmware();
-  	testRequestCnt=0;
-  }
-  
-  if (HostSide.available())
-  {
-    uint8_t achar;
-    achar = HostSide.read(); 
-
-	if (!bSyncFoundLeft && achar == SYNC_START[syncStartLeft])
+  	if (sk3k1110.available()) 
 	{
-		if (syncStartLeft == 3)
-		{
-			Left[indexLeft++] = achar;
-			bSyncFoundLeft = true;
-		}
-		else
-		{
-			syncStartLeft++;
-			Left[indexLeft++] = achar;
-			goto doRight;
-		}
-	}
-	else
-	{
-		syncStartLeft = 0;
-		indexLeft = 0;
-		bSyncFoundLeft = false;
-		goto doRight;
-	}
 		
+		uint8_t achar;
+		achar = sk3k1110.read();
+		digitalWrite(PIN_LED, 1);
 
-	Left[indexLeft++] = achar;
-	if (indexLeft == MAX_CHARS || achar == 0xA)
-	{
-		dump("TO SK3:", Left, MIN(MAX_CHARS, indexLeft -1));
-		indexLeft = 0;
-		syncStartLeft = 0;
-		bSyncFoundLeft = false;
-	}
-
-    sk3k1110.write(achar);  // read it and send it out HostSide1 (pins 0 & 1)
-  }
-
-doRight:
-
-
-  if (sk3k1110.available()) 
-  {
-	  uint8_t achar;
-	  achar = sk3k1110.read();
-	  digitalWrite(PIN_LED, 1);
-
-	  //HostSide.print(achar, HEX); HostSide.print("  ");
+		//HostSide.print(achar, HEX); HostSide.print("  ");
 
 #ifdef LOOK4SYNC
-	  if (!bSyncFoundRight)
-	  {
-	  	  if (achar == SYNC_START[syncStartRight])
-	  	  {
-			  HostSide.print(syncStartRight+1); 
-			  if (syncStartRight == 3)
-			  {
+		if (!bSyncFoundRight)
+		{
+			if (achar == SYNC_START[syncStartRight])
+			{
+				if (syncStartRight == 3)
+				{
 				  Right[indexRight++] = achar;
 				  bSyncFoundRight = true;
 				  syncEndRight = 0;
-			  }
-			  else
-			  {
+				}
+				else
+				{
 				  digitalWrite(PIN_LED, 1);
 				  syncStartRight++;
 				  Right[indexRight++] = achar;
-			  }
-		  }
-		  else
-		  {
-		  	  //sync still not found. or sync miss
-			  syncStartRight = 0;
-			  indexRight = 0;
-			  bSyncFoundRight = false;
-			  digitalWrite(PIN_LED, 0);
-	      }
-	  }
-	  else
+				}
+			}
+			else
+			{
+				//sync still not found. or sync miss
+				syncStartRight = 0;
+				indexRight = 0;
+				bSyncFoundRight = false;
+				digitalWrite(PIN_LED, 0);
+			}
+		}
+		else
 #endif
-
-	  {
-	  	// sync has been found... collect payload
+				
+		{
+			// sync has been found... collect payload
 			Right[indexRight++] = achar;
 
 #ifdef LOOK4SYNC
@@ -261,7 +201,6 @@ doRight:
 				if (syncEndRight == 3)
 				{
 					syncEndRight = 0;
-
 					
 					dump("FROM SK3:", Right, MIN(MAX_CHARS, indexRight));
 					indexRight = 0;
@@ -275,11 +214,127 @@ doRight:
 				}
 			}
 #endif
-	  }
+		}
 
-    HostSide.write(achar);  // read it and send it out HostSide (USB)
-  
-  	}
+	  HostSide.print(achar);
+	}
 }
 
+//-------------------------------------------------------------
+// allow 2 different sources to send to the S3
+// one is from the serial stream from the PC
+// the other is from an internal test stub in this program
+
+void toS3(char achar)
+{
+	digitalWrite(PIN_LED, 1);
+
+#ifdef LOOK4SYNC
+	  if (!bSyncFoundLeft)
+	  {
+		  if (achar == SYNC_START[syncStartLeft])
+		  {
+			  if (syncStartLeft == 3)
+			  {
+				  Left[indexLeft++] = achar;
+				  bSyncFoundLeft = true;
+				  syncEndLeft = 0;
+			  }
+			  else
+			  {
+				  digitalWrite(PIN_LED, 1);
+				  syncStartLeft++;
+				  Left[indexLeft++] = achar;
+			  }
+		  }
+		  else
+		  {
+			  //sync still not found. or sync miss
+			  syncStartLeft = 0;
+			  indexLeft = 0;
+			  bSyncFoundLeft = false;
+			  digitalWrite(PIN_LED, 0);
+		  }
+	  }
+	  else
+#endif
+
+	  {
+		// sync has been found... collect payload
+			Left[indexLeft++] = achar;
+
+#ifdef LOOK4SYNC
+			if (achar == SYNC_END[syncEndLeft])
+			{
+				if (syncEndLeft == 3)
+				{
+					syncEndLeft = 0;
+
+					
+					dump("TO SK3:", Left, MIN(MAX_CHARS, indexLeft));
+					indexLeft = 0;
+					syncStartLeft = 0;
+					bSyncFoundLeft = false;
+				}
+				else
+				{
+					digitalWrite(PIN_LED, 1);
+					syncEndLeft++;
+				}
+			}
+#endif
+		}
+	sk3k1110.write(achar);
+}
+
+//-------------------------------------------------------------
+void inject_toS3(char achar)
+{
+	toS3(achar);
+}
+//--------------------------------------------------------------
+void process_toS3(void)
+{
+	if (HostSide.available()) 
+	{
+		uint8_t achar;
+		achar = HostSide.read();
+		toS3(achar);
+	}
+}
+
+//-------------------------------------------------------------
+
+void request_firmware(void)
+{
+	int i;
+	for (i = 0; i < ELEMENTS(SYNC_START); i++) 
+	{
+		toS3(SYNC_START[i]);
+	}
+
+	for (i = 0; i < ELEMENTS(GET_FIRMWARE); i++) 
+	{
+		toS3(GET_FIRMWARE[i]);
+	}
+	for (i = 0; i < ELEMENTS(SYNC_END); i++) 
+	{
+		toS3(SYNC_END[i]);
+	}
+}
+
+//----------------------------------------------------------
+static int testRequestCnt =0;
+void rs232_loop() 
+{
+
+  if (testRequestCnt++ > 10000)
+  {
+  	request_firmware();
+  	testRequestCnt=0;
+  }
+
+  process_toS3();
+  process_fromS3();
+}
 
