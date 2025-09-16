@@ -24,6 +24,8 @@ uint8_t GET_FIRMWARE [] = { 02, 00, 00, 00 };
 
 #define ELEMENTS(x) (sizeof(x)/sizeof(x[0]))
 
+#define LOOK4SYNC   // reverse eng of S3KM1110
+
 
 #if 1
 // danger uart 1 is the flash (ouch).
@@ -88,11 +90,17 @@ int indexRight = 0;
 int syncStartLeft = 0;
 int syncStartRight = 0;
 
+int syncEndLeft = 0;
+int syncEndRight = 0;
+
+
 bool bSyncFoundLeft = false;
 bool bSyncFoundRight = false;
 
 
 char bigBuffer[2000];
+
+//--------------------------------------------------------------
 
 void sendit(char *what)
 {
@@ -100,14 +108,15 @@ void sendit(char *what)
 	HostSide.printf("%s", what);
 }
 
+//--------------------------------------------------------------
 
-#define WIDE 16
+#define WIDE 32
 void dump(char * tag, uint8_t *array, int size)
 {
 
 	int forward = 0;
 	
-	sprintf(bigBuffer, "%s ==== %d =======\n", tag, size);
+	sprintf(bigBuffer, "%s[%d] : ", tag, size);
 	sendit(bigBuffer);
 	
 	while (size > 0)
@@ -147,15 +156,17 @@ void dump(char * tag, uint8_t *array, int size)
 
 }
 
-static int foo =0;
+//--------------------------------------------------------------
+
+static int testRequestCnt =0;
 
 void rs232_loop() 
 {
 
-  if (foo++ > 1000)
+  if (testRequestCnt++ > 10000)
   {
   	request_firmware();
-  	foo=0;
+  	testRequestCnt=0;
   }
   
   if (HostSide.available())
@@ -209,6 +220,7 @@ doRight:
 
 	  //HostSide.print(achar, HEX); HostSide.print("  ");
 
+#ifdef LOOK4SYNC
 	  if (!bSyncFoundRight)
 	  {
 	  	  if (achar == SYNC_START[syncStartRight])
@@ -218,6 +230,7 @@ doRight:
 			  {
 				  Right[indexRight++] = achar;
 				  bSyncFoundRight = true;
+				  syncEndRight = 0;
 			  }
 			  else
 			  {
@@ -236,17 +249,32 @@ doRight:
 	      }
 	  }
 	  else
+#endif
+
 	  {
 	  	// sync has been found... collect payload
 			Right[indexRight++] = achar;
 
-			if (indexRight == MAX_CHARS || achar == 0xA)
+#ifdef LOOK4SYNC
+			if (achar == SYNC_END[syncEndRight])
 			{
-				dump("FROM SK3:", Right, MIN(MAX_CHARS, indexRight -1));
-				indexRight = 0;
-				syncStartRight = 0;
-				bSyncFoundRight = false;
+				if (syncEndRight == 3)
+				{
+					syncEndRight = 0;
+
+					
+					dump("FROM SK3:", Right, MIN(MAX_CHARS, indexRight));
+					indexRight = 0;
+					syncStartRight = 0;
+					bSyncFoundRight = false;
+				}
+				else
+				{
+					digitalWrite(PIN_LED, 1);
+					syncEndRight++;
+				}
 			}
+#endif
 	  }
 
     HostSide.write(achar);  // read it and send it out HostSide (USB)
