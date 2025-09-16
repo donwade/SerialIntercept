@@ -1,0 +1,8 @@
+#!/bin/bash
+#abuild wrover --ip m5-core2.local $*
+abuild wrover --ip rover.local -DS3KM1110_DEBUG_COMMANDS -DS3KM1110_DEBUG_DATA  $*
+#abuild wrover --ip rover.local -DS3KM1110_DEBUG_COMMANDS $*
+
+
+
+
