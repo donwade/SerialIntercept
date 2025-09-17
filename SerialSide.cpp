@@ -17,11 +17,18 @@ extern ESPTelnet telnet;
 #include <HardwareSerial.h>
 HardwareSerial sk3k1110(2);
 
-uint8_t SYNC_START[] = {0XFD, 0xFC, 0xFB, 0xFA};
-uint8_t SYNC_END  [] = {4,3,2,1};
+uint8_t SYNC_START1[] = {0XFD, 0xFC, 0xFB, 0xFA};
+uint8_t SYNC_END1  [] = {4,3,2,1};
+
+uint8_t SYNC_START2[] = {0XAA, 0xBF, 0x10, 0x14};
+uint8_t SYNC_END2  [] = {0xFD, 0xFC, 0xFB, 0xFA};
+
+
 
 uint8_t GET_FIRMWARE [] = { 02, 00, 00, 00 };
 uint8_t SET_REPORT_MODE [] = { 8,00,   12,00,   00,00,  04,00,00,00 };
+uint8_t SET_NORMAL_MODE [] = { 8,00,   12,00,   00,00,  64,00,00,00 };
+uint8_t SET_DEBUG_MODE  [] = { 8,00,   12,00,   00,00,  00,00,00,00 };
 
 #define ELEMENTS(x) (sizeof(x)/sizeof(x[0]))
 
@@ -32,9 +39,15 @@ uint8_t SET_REPORT_MODE [] = { 8,00,   12,00,   00,00,  04,00,00,00 };
 //#define ECHO_TELNET_TO_SERIAL
 
 // define on linux side only 
-// #define SELF_TEST
+#define TEST_GET_FIRMWARE
+#define TEST_REPORT_MODE
+#define TEST_NORMAL_MODE
+#define TEST_DEBUG_MODE
 
 void request_firmware(void);
+
+
+//---------------------------------------------------------
 
 // danger uart 1 is the flash (ouch).
 HardwareSerial HostSide(0);
@@ -73,14 +86,17 @@ int indexLeft = 0;
 int indexRight = 0;
 
 int syncStartLeft = 0;
-int syncStartRight = 0;
+int sync1StartRight = 0;
 
-int syncEndLeft = 0;
-int syncEndRight = 0;
+int sync1EndLeft = 0;
+int sync1EndRight = 0;
+bool bSync1FoundLeft = false;
+bool bSync1FoundRight = false;
 
-
-bool bSyncFoundLeft = false;
-bool bSyncFoundRight = false;
+int sync2EndLeft = 0;
+int sync2EndRight = 0;
+bool bSync2FoundLeft = false;
+bool bSync2FoundRight = false;
 
 
 char bigBuffer[2000];
@@ -175,29 +191,29 @@ void process_fromS3(void)
 
 		//HostSide.print(achar, HEX); HostSide.print("  ");
 
-		if (!bSyncFoundRight)
+		if (!bSync1FoundRight)
 		{
-			if (achar == SYNC_START[syncStartRight])
+			if (achar == SYNC_START1[sync1StartRight])
 			{
-				if (syncStartRight == 3)
+				if (sync1StartRight == 3)
 				{
 				  Right[indexRight++] = achar;
-				  bSyncFoundRight = true;
-				  syncEndRight = 0;
+				  bSync1FoundRight = true;
+				  sync1EndRight = 0;
 				}
 				else
 				{
 				  digitalWrite(PIN_LED, 1);
-				  syncStartRight++;
+				  sync1StartRight++;
 				  Right[indexRight++] = achar;
 				}
 			}
 			else
 			{
 				//sync still not found. or sync miss
-				syncStartRight = 0;
+				sync1StartRight = 0;
 				indexRight = 0;
-				bSyncFoundRight = false;
+				bSync1FoundRight = false;
 				digitalWrite(PIN_LED, 0);
 			}
 		}
@@ -206,21 +222,21 @@ void process_fromS3(void)
 			// sync has been found... collect payload
 			Right[indexRight++] = achar;
 
-			if (achar == SYNC_END[syncEndRight])
+			if (achar == SYNC_END1[sync1EndRight])
 			{
-				if (syncEndRight == 3)
+				if (sync1EndRight == 3)
 				{
-					syncEndRight = 0;
+					sync1EndRight = 0;
 					
 					dump("FROM SK3:", Right, MIN(MAX_CHARS, indexRight));
 					indexRight = 0;
-					syncStartRight = 0;
-					bSyncFoundRight = false;
+					sync1StartRight = 0;
+					bSync1FoundRight = false;
 				}
 				else
 				{
 					digitalWrite(PIN_LED, 1);
-					syncEndRight++;
+					sync1EndRight++;
 				}
 			}
 		}
@@ -240,15 +256,15 @@ void toS3(char achar)
 
 #ifdef LOOK4SYNC
 	
-	if (!bSyncFoundLeft)
+	if (!bSync1FoundLeft)
 	{
-		if (achar == SYNC_START[syncStartLeft])
+		if (achar == SYNC_START1[syncStartLeft])
 		{
 		  if (syncStartLeft == 3)
 		  {
 			  Left[indexLeft++] = achar;
-			  bSyncFoundLeft = true;
-			  syncEndLeft = 0;
+			  bSync1FoundLeft = true;
+			  sync1EndLeft = 0;
 		  }
 		  else
 		  {
@@ -262,7 +278,7 @@ void toS3(char achar)
 		  //sync still not found. or sync miss
 		  syncStartLeft = 0;
 		  indexLeft = 0;
-		  bSyncFoundLeft = false;
+		  bSync1FoundLeft = false;
 		  digitalWrite(PIN_LED, 0);
 		}
 	}
@@ -271,22 +287,22 @@ void toS3(char achar)
 		// sync has been found... collect payload
 		Left[indexLeft++] = achar;
 
-		if (achar == SYNC_END[syncEndLeft])
+		if (achar == SYNC_END1[sync1EndLeft])
 		{
-			if (syncEndLeft == 3)
+			if (sync1EndLeft == 3)
 			{
-				syncEndLeft = 0;
+				sync1EndLeft = 0;
 
 				
 				dump("TO SK3:", Left, MIN(MAX_CHARS, indexLeft));
 				indexLeft = 0;
 				syncStartLeft = 0;
-				bSyncFoundLeft = false;
+				bSync1FoundLeft = false;
 			}
 			else
 			{
 				digitalWrite(PIN_LED, 1);
-				syncEndLeft++;
+				sync1EndLeft++;
 			}
 		}
 	}
@@ -313,21 +329,62 @@ void process_toS3(void)
 
 //--------------------------------------------------------------
 
-void request_report(void)
+void request_normal(void)
 {
 	int i;
-	for (i = 0; i < ELEMENTS(SYNC_START); i++) 
+	for (i = 0; i < ELEMENTS(SYNC_START1); i++) 
 	{
-		toS3(SYNC_START[i]);
+		toS3(SYNC_START1[i]);
 	}
 
-	for (i = 0; i < ELEMENTS(GET_FIRMWARE); i++) 
+	for (i = 0; i < ELEMENTS(SET_NORMAL_MODE); i++) 
 	{
 		toS3(SET_REPORT_MODE[i]);
 	}
-	for (i = 0; i < ELEMENTS(SYNC_END); i++) 
+	for (i = 0; i < ELEMENTS(SYNC_END1); i++) 
 	{
-		toS3(SYNC_END[i]);
+		toS3(SYNC_END1[i]);
+	}
+}
+
+//--------------------------------------------------------------
+
+void request_debug(void)
+{
+	int i;
+	for (i = 0; i < ELEMENTS(SYNC_START1); i++) 
+	{
+		toS3(SYNC_START1[i]);
+	}
+
+	for (i = 0; i < ELEMENTS(SET_DEBUG_MODE); i++) 
+	{
+		toS3(SET_DEBUG_MODE[i]);
+	}
+	for (i = 0; i < ELEMENTS(SYNC_END1); i++) 
+	{
+		toS3(SYNC_END1[i]);
+	}
+}
+
+
+//--------------------------------------------------------------
+
+void request_report(void)
+{
+	int i;
+	for (i = 0; i < ELEMENTS(SYNC_START1); i++) 
+	{
+		toS3(SYNC_START1[i]);
+	}
+
+	for (i = 0; i < ELEMENTS(SET_REPORT_MODE); i++) 
+	{
+		toS3(SET_REPORT_MODE[i]);
+	}
+	for (i = 0; i < ELEMENTS(SYNC_END1); i++) 
+	{
+		toS3(SYNC_END1[i]);
 	}
 }
 
@@ -337,18 +394,18 @@ void request_report(void)
 void request_firmware(void)
 {
 	int i;
-	for (i = 0; i < ELEMENTS(SYNC_START); i++) 
+	for (i = 0; i < ELEMENTS(SYNC_START1); i++) 
 	{
-		toS3(SYNC_START[i]);
+		toS3(SYNC_START1[i]);
 	}
 
 	for (i = 0; i < ELEMENTS(GET_FIRMWARE); i++) 
 	{
 		toS3(GET_FIRMWARE[i]);
 	}
-	for (i = 0; i < ELEMENTS(SYNC_END); i++) 
+	for (i = 0; i < ELEMENTS(SYNC_END1); i++) 
 	{
-		toS3(SYNC_END[i]);
+		toS3(SYNC_END1[i]);
 	}
 }
 
@@ -359,18 +416,35 @@ static int testReport = 0;
 void rs232_loop() 
 {
 
-#ifdef SELF_TEST
+#ifdef TEST_GET_FIRMWARE
   if (testRequestCnt++ > 10000)
   {
   	request_firmware();
   	testRequestCnt = 0;
   }
-  
+#endif
+
+#ifdef TEST_REPORT_MODE
   if (testReport++ == 50000)
   {
   	request_report();  // one shot.
   }
 #endif
+
+#ifdef TEST_NORMAL_MODE
+	if (testReport++ == 50000)
+	{
+	  request_normal();  // one shot.
+	}
+#endif
+
+#ifdef TEST_DEBUG_MODE
+	  if (testReport++ == 50000)
+	  {
+		request_debug();  // one shot.
+	  }
+#endif
+  
 
   process_toS3();
   process_fromS3();
