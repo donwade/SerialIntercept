@@ -21,15 +21,20 @@ uint8_t SYNC_START[] = {0XFD, 0xFC, 0xFB, 0xFA};
 uint8_t SYNC_END  [] = {4,3,2,1};
 
 uint8_t GET_FIRMWARE [] = { 02, 00, 00, 00 };
+uint8_t SET_REPORT_MODE [] = { 8,00,   12,00,   00,00,  04,00,00,00 };
 
 #define ELEMENTS(x) (sizeof(x)/sizeof(x[0]))
 
 // comment out below for simple passthru
-//#define LOOK4SYNC   // reverse eng of S3KM1110
+#define LOOK4SYNC   // reverse eng of S3KM1110
 
 // do not enable when driven by the S3K app 
 //#define ECHO_TELNET_TO_SERIAL
 
+// define on linux side only 
+// #define SELF_TEST
+
+void request_firmware(void);
 
 // danger uart 1 is the flash (ouch).
 HardwareSerial HostSide(0);
@@ -54,6 +59,9 @@ void rs232_setup(void)
     while (sk3k1110.available()) sk3k1110.read();
 
     HostSide.printf("looping\n");
+    
+	request_firmware();
+	
 }
 
 #define MAX_CHARS 80
@@ -92,7 +100,7 @@ void send2TelenetMonitor(char *what)
     // turn it on so you can watch.
     
     #ifdef ECHO_TELNET_TO_SERIAL
-	HostSide.printf("%s", what);
+	HostSide.printf("%s\ns", what);
 	#endif 
 }
 
@@ -217,7 +225,7 @@ void process_fromS3(void)
 			}
 		}
 #endif
-	  HostSide.print(achar);
+	  HostSide.write(achar);  // not print!
 	}
 }
 
@@ -303,6 +311,27 @@ void process_toS3(void)
 	}
 }
 
+//--------------------------------------------------------------
+
+void request_report(void)
+{
+	int i;
+	for (i = 0; i < ELEMENTS(SYNC_START); i++) 
+	{
+		toS3(SYNC_START[i]);
+	}
+
+	for (i = 0; i < ELEMENTS(GET_FIRMWARE); i++) 
+	{
+		toS3(SET_REPORT_MODE[i]);
+	}
+	for (i = 0; i < ELEMENTS(SYNC_END); i++) 
+	{
+		toS3(SYNC_END[i]);
+	}
+}
+
+
 //-------------------------------------------------------------
 
 void request_firmware(void)
@@ -325,14 +354,23 @@ void request_firmware(void)
 
 //----------------------------------------------------------
 static int testRequestCnt =0;
+static int testReport = 0;
+
 void rs232_loop() 
 {
 
+#ifdef SELF_TEST
   if (testRequestCnt++ > 10000)
   {
   	request_firmware();
-  	testRequestCnt=0;
+  	testRequestCnt = 0;
   }
+  
+  if (testReport++ == 50000)
+  {
+  	request_report();  // one shot.
+  }
+#endif
 
   process_toS3();
   process_fromS3();
