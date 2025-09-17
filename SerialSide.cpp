@@ -80,24 +80,26 @@ void rs232_setup(void)
 #define MAX_CHARS 80
 
 uint8_t Left[MAX_CHARS];
-uint8_t Right[MAX_CHARS];
 
 int indexLeft = 0;
-int indexRight = 0;
-
 int syncStartLeft = 0;
-int sync1StartRight = 0;
-
-int sync1EndLeft = 0;
-int sync1EndRight = 0;
 bool bSync1FoundLeft = false;
-bool bSync1FoundRight = false;
-
-int sync2EndLeft = 0;
-int sync2EndRight = 0;
 bool bSync2FoundLeft = false;
-bool bSync2FoundRight = false;
+int sync1EndLeft = 0;
+int sync2EndLeft = 0;
 
+
+uint8_t S3DataX1[MAX_CHARS];
+int  iS3DataX1 = 0;
+int  iS3Preamble1 = 0;
+int  iS3Postamble1 = 0;
+bool bS3Preamble1 = false;
+
+uint8_t S3DataX2[MAX_CHARS];
+int  iS3DataX2 = 0;
+int  iS3Preamble2 = 0;
+int  iS3Postamble2 = 0;
+bool bS3Preamble2 = false;
 
 char bigBuffer[2000];
 
@@ -167,6 +169,112 @@ void dump(char * tag, uint8_t *array, int size)
 
 }
 
+//--------------------------------------------------------------
+
+void syncX1S3(uint8_t achar)
+{
+
+	if (!bS3Preamble1)
+	{
+		if (achar == SYNC_START1[iS3Preamble1])
+		{
+			if (iS3Preamble1 == 3)
+			{
+			  bS3Preamble1 = true;
+			  iS3Postamble1 = 0;
+			  S3DataX1[iS3DataX1++] = achar;
+			}
+			else
+			{
+			  iS3Preamble1++;
+			  S3DataX1[iS3DataX1++] = achar;
+			}
+		}
+		else
+		{
+			//sync still not found. or sync miss
+			iS3Preamble1 = 0;
+			iS3DataX1 = 0;
+			bS3Preamble1 = false;
+			digitalWrite(PIN_LED, 0);
+		}
+	}
+	else
+	{
+		// sync has been found... collect payload
+		S3DataX1[iS3DataX1++] = achar;
+
+		if (achar == SYNC_END1[iS3Postamble1])
+		{
+			if (iS3Postamble1 == 3)
+			{
+				iS3Postamble1 = 0;
+				
+				dump("FROM SK3:", S3DataX1, MIN(MAX_CHARS, iS3DataX1));
+				iS3DataX1 = 0;
+				iS3Preamble1 = 0;
+				bS3Preamble1 = false;
+			}
+			else
+			{
+				digitalWrite(PIN_LED, 1);
+				iS3Postamble1++;
+			}
+		}
+	}
+}
+
+//--------------------------------------------------------------
+
+void syncX2S3(uint8_t achar)
+{
+	if (!bS3Preamble2)
+	{
+		if (achar == SYNC_START2[iS3Preamble2])
+		{
+			if (iS3Preamble2 == 3)
+			{
+			  bS3Preamble2 = true;
+			  iS3Postamble2 = 0;
+			  S3DataX2[iS3DataX2++] = achar;
+			}
+			else
+			{
+			  iS3Preamble2++;
+			  S3DataX2[iS3DataX2++] = achar;
+			}
+		}
+		else
+		{
+			//sync still not found. or sync miss
+			iS3Preamble2 = 0;
+			iS3DataX2 = 0;
+			bS3Preamble2 = false;
+		}
+	}
+	else
+	{
+		// sync has been found... collect payload
+		S3DataX2[iS3DataX2++] = achar;
+
+		if (achar == SYNC_END2[iS3Postamble2])
+		{
+			if (iS3Postamble2 == 3)
+			{
+				iS3Postamble2 = 0;
+				
+				dump("FROM SK3:", S3DataX2, MIN(MAX_CHARS, iS3DataX2));
+				iS3DataX2 = 0;
+				iS3Preamble2 = 0;
+				bS3Preamble2 = false;
+			}
+			else
+			{
+				iS3Postamble2++;
+			}
+		}
+	}
+}
 
 //--------------------------------------------------------------
 void process_fromS3(void)
@@ -186,61 +294,11 @@ void process_fromS3(void)
 			bToggle = !bToggle;
 			digitalWrite(PIN_LED, bToggle);
 		}		
-	
+
 #ifdef LOOK4SYNC
-
-		//HostSide.print(achar, HEX); HostSide.print("  ");
-
-		if (!bSync1FoundRight)
-		{
-			if (achar == SYNC_START1[sync1StartRight])
-			{
-				if (sync1StartRight == 3)
-				{
-				  Right[indexRight++] = achar;
-				  bSync1FoundRight = true;
-				  sync1EndRight = 0;
-				}
-				else
-				{
-				  digitalWrite(PIN_LED, 1);
-				  sync1StartRight++;
-				  Right[indexRight++] = achar;
-				}
-			}
-			else
-			{
-				//sync still not found. or sync miss
-				sync1StartRight = 0;
-				indexRight = 0;
-				bSync1FoundRight = false;
-				digitalWrite(PIN_LED, 0);
-			}
-		}
-		else
-		{
-			// sync has been found... collect payload
-			Right[indexRight++] = achar;
-
-			if (achar == SYNC_END1[sync1EndRight])
-			{
-				if (sync1EndRight == 3)
-				{
-					sync1EndRight = 0;
-					
-					dump("FROM SK3:", Right, MIN(MAX_CHARS, indexRight));
-					indexRight = 0;
-					sync1StartRight = 0;
-					bSync1FoundRight = false;
-				}
-				else
-				{
-					digitalWrite(PIN_LED, 1);
-					sync1EndRight++;
-				}
-			}
-		}
+	  syncX1S3(achar);
 #endif
+
 	  HostSide.write(achar);  // not print!
 	}
 }
