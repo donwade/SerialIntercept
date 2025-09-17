@@ -24,19 +24,15 @@ uint8_t GET_FIRMWARE [] = { 02, 00, 00, 00 };
 
 #define ELEMENTS(x) (sizeof(x)/sizeof(x[0]))
 
-#define LOOK4SYNC   // reverse eng of S3KM1110
+// comment out below for simple passthru
+//#define LOOK4SYNC   // reverse eng of S3KM1110
 
 // do not enable when driven by the S3K app 
 //#define ECHO_TELNET_TO_SERIAL
 
 
-#if 1
 // danger uart 1 is the flash (ouch).
 HardwareSerial HostSide(0);
-#else
-#define HostSide Serial
-#error caution serial echos back to term :(
-#endif
 
 uint32_t lastReading = 0;
 
@@ -52,7 +48,6 @@ void rs232_setup(void)
 
     HostSide.printf("used for interept of serial stream for S3KM11110\n");
 
-	delay(3000);
 	digitalWrite(PIN_LED, 0);
 	
     while (HostSide.available()) HostSide.read();
@@ -154,14 +149,24 @@ void process_fromS3(void)
 {
   	if (sk3k1110.available()) 
 	{
+		static uint16_t cnt;
+		static bool bToggle;
 		
 		uint8_t achar;
 		achar = sk3k1110.read();
-		digitalWrite(PIN_LED, 1);
+
+		cnt++;
+		if (cnt > 30)
+		{
+			cnt = 0;
+			bToggle = !bToggle;
+			digitalWrite(PIN_LED, bToggle);
+		}		
+	
+#ifdef LOOK4SYNC
 
 		//HostSide.print(achar, HEX); HostSide.print("  ");
 
-#ifdef LOOK4SYNC
 		if (!bSyncFoundRight)
 		{
 			if (achar == SYNC_START[syncStartRight])
@@ -189,13 +194,10 @@ void process_fromS3(void)
 			}
 		}
 		else
-#endif
-				
 		{
 			// sync has been found... collect payload
 			Right[indexRight++] = achar;
 
-#ifdef LOOK4SYNC
 			if (achar == SYNC_END[syncEndRight])
 			{
 				if (syncEndRight == 3)
@@ -213,9 +215,8 @@ void process_fromS3(void)
 					syncEndRight++;
 				}
 			}
-#endif
 		}
-
+#endif
 	  HostSide.print(achar);
 	}
 }
@@ -230,61 +231,60 @@ void toS3(char achar)
 	digitalWrite(PIN_LED, 1);
 
 #ifdef LOOK4SYNC
-	  if (!bSyncFoundLeft)
-	  {
-		  if (achar == SYNC_START[syncStartLeft])
+	
+	if (!bSyncFoundLeft)
+	{
+		if (achar == SYNC_START[syncStartLeft])
+		{
+		  if (syncStartLeft == 3)
 		  {
-			  if (syncStartLeft == 3)
-			  {
-				  Left[indexLeft++] = achar;
-				  bSyncFoundLeft = true;
-				  syncEndLeft = 0;
-			  }
-			  else
-			  {
-				  digitalWrite(PIN_LED, 1);
-				  syncStartLeft++;
-				  Left[indexLeft++] = achar;
-			  }
+			  Left[indexLeft++] = achar;
+			  bSyncFoundLeft = true;
+			  syncEndLeft = 0;
 		  }
 		  else
 		  {
-			  //sync still not found. or sync miss
-			  syncStartLeft = 0;
-			  indexLeft = 0;
-			  bSyncFoundLeft = false;
-			  digitalWrite(PIN_LED, 0);
+			  digitalWrite(PIN_LED, 1);
+			  syncStartLeft++;
+			  Left[indexLeft++] = achar;
 		  }
-	  }
-	  else
-#endif
-
-	  {
-		// sync has been found... collect payload
-			Left[indexLeft++] = achar;
-
-#ifdef LOOK4SYNC
-			if (achar == SYNC_END[syncEndLeft])
-			{
-				if (syncEndLeft == 3)
-				{
-					syncEndLeft = 0;
-
-					
-					dump("TO SK3:", Left, MIN(MAX_CHARS, indexLeft));
-					indexLeft = 0;
-					syncStartLeft = 0;
-					bSyncFoundLeft = false;
-				}
-				else
-				{
-					digitalWrite(PIN_LED, 1);
-					syncEndLeft++;
-				}
-			}
-#endif
 		}
+		else
+		{
+		  //sync still not found. or sync miss
+		  syncStartLeft = 0;
+		  indexLeft = 0;
+		  bSyncFoundLeft = false;
+		  digitalWrite(PIN_LED, 0);
+		}
+	}
+  	else
+	{
+		// sync has been found... collect payload
+		Left[indexLeft++] = achar;
+
+		if (achar == SYNC_END[syncEndLeft])
+		{
+			if (syncEndLeft == 3)
+			{
+				syncEndLeft = 0;
+
+				
+				dump("TO SK3:", Left, MIN(MAX_CHARS, indexLeft));
+				indexLeft = 0;
+				syncStartLeft = 0;
+				bSyncFoundLeft = false;
+			}
+			else
+			{
+				digitalWrite(PIN_LED, 1);
+				syncEndLeft++;
+			}
+		}
+	}
+#endif
 	sk3k1110.write(achar);
+	
 }
 
 //-------------------------------------------------------------
